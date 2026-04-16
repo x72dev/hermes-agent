@@ -252,6 +252,25 @@ class TelegramAdapter(BasePlatformAdapter):
             return {"link_preview_options": LinkPreviewOptions(is_disabled=True)}
         return {"disable_web_page_preview": True}
 
+    async def _sync_bot_command_menu(self) -> None:
+        """Register Telegram BotCommand menus for both default and zh locales.
+
+        Telegram stores locale-specific BotCommand menus separately from the
+        default scope. Older Hermes builds left a zh-specific menu containing
+        skill/plugin commands on Telegram's side, so startup must overwrite both
+        the default menu and the zh override with the clean built-in-only menu.
+        """
+        if not self._bot:
+            return
+
+        from telegram import BotCommand
+        from hermes_cli.commands import telegram_menu_commands
+
+        menu_commands, _hidden_count = telegram_menu_commands(max_commands=100, locale="zh")
+        payload = [BotCommand(name, desc) for name, desc in menu_commands]
+        await self._bot.set_my_commands(payload)
+        await self._bot.set_my_commands(payload, language_code="zh")
+
     async def _handle_polling_network_error(self, error: Exception) -> None:
         """Reconnect polling after a transient network interruption.
 
@@ -742,13 +761,7 @@ class TelegramAdapter(BasePlatformAdapter):
             # Register built-in bot commands so Telegram shows a clean / menu.
             # Skills and plugins stay discoverable via /help and /commands.
             try:
-                from telegram import BotCommand
-                from hermes_cli.commands import telegram_menu_commands
-
-                menu_commands, _hidden_count = telegram_menu_commands(max_commands=100, locale="zh")
-                await self._bot.set_my_commands([
-                    BotCommand(name, desc) for name, desc in menu_commands
-                ])
+                await self._sync_bot_command_menu()
             except Exception as e:
                 logger.warning(
                     "[%s] Could not register Telegram command menu: %s",
