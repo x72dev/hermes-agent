@@ -199,6 +199,12 @@ class TestGatewayHelpLines:
         assert len(bg_line) == 1
         assert "/bg" in bg_line[0]
 
+    def test_localizes_zh_descriptions_and_alias_label(self):
+        lines = gateway_help_lines(locale="zh")
+        joined = "\n".join(lines)
+        assert "`/help` -- 显示可用命令" in joined
+        assert "`/background <prompt>` -- 后台运行一个提示词 (别名: `/bg`" in joined
+
 
 class TestTelegramBotCommands:
     def test_returns_list_of_tuples(self):
@@ -207,6 +213,11 @@ class TestTelegramBotCommands:
         for name, desc in cmds:
             assert isinstance(name, str)
             assert isinstance(desc, str)
+
+    def test_localizes_descriptions_for_zh(self):
+        descriptions = dict(telegram_bot_commands(locale="zh"))
+        assert descriptions["help"] == "显示可用命令"
+        assert descriptions["commands"] == "浏览全部命令和技能（分页）"
 
     def test_no_hyphens_in_command_names(self):
         """Telegram does not support hyphens in command names."""
@@ -685,32 +696,20 @@ class TestTelegramMenuCommands:
                 f"Command '{name}' is {len(name)} chars (limit {_TG_NAME_LIMIT})"
             )
 
-    def test_excludes_telegram_disabled_skills(self, tmp_path, monkeypatch):
-        """Skills disabled for telegram should not appear in the menu."""
-        from unittest.mock import patch, MagicMock
+    def test_localizes_telegram_menu_to_zh(self):
+        descriptions = dict(telegram_menu_commands(max_commands=100, locale="zh")[0])
+        assert descriptions["help"] == "显示可用命令"
+        assert descriptions["commands"] == "浏览全部命令和技能（分页）"
 
-        # Set up a config with a telegram-specific disabled list
-        config_file = tmp_path / "config.yaml"
-        config_file.write_text(
-            "skills:\n"
-            "  platform_disabled:\n"
-            "    telegram:\n"
-            "      - my-disabled-skill\n"
-        )
+    def test_excludes_skill_commands_from_telegram_menu(self, tmp_path, monkeypatch):
+        from unittest.mock import patch
+
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-
-        # Mock get_skill_commands to return two skills
         fake_skills_dir = str(tmp_path / "skills")
         fake_cmds = {
-            "/my-disabled-skill": {
-                "name": "my-disabled-skill",
-                "description": "Should be hidden",
-                "skill_md_path": f"{fake_skills_dir}/my-disabled-skill/SKILL.md",
-                "skill_dir": f"{fake_skills_dir}/my-disabled-skill",
-            },
             "/my-enabled-skill": {
                 "name": "my-enabled-skill",
-                "description": "Should be visible",
+                "description": "Should stay in /help only",
                 "skill_md_path": f"{fake_skills_dir}/my-enabled-skill/SKILL.md",
                 "skill_dir": f"{fake_skills_dir}/my-enabled-skill",
             },
@@ -720,79 +719,27 @@ class TestTelegramMenuCommands:
             patch("tools.skills_tool.SKILLS_DIR", tmp_path / "skills"),
         ):
             (tmp_path / "skills").mkdir(exist_ok=True)
-            menu, hidden = telegram_menu_commands(max_commands=100)
+            menu, hidden = telegram_menu_commands(max_commands=100, locale="zh")
 
         menu_names = {n for n, _ in menu}
-        assert "my_enabled_skill" in menu_names
-        assert "my_disabled_skill" not in menu_names
+        assert "my_enabled_skill" not in menu_names
+        assert hidden == 0
 
-    def test_special_chars_in_skill_names_sanitized(self, tmp_path, monkeypatch):
-        """Skills with +, /, or other special chars produce valid Telegram names."""
-        from unittest.mock import patch
-        import re
-
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-
-        fake_skills_dir = str(tmp_path / "skills")
-        fake_cmds = {
-            "/jellyfin-+-jellystat-24h-summary": {
-                "name": "Jellyfin + Jellystat 24h Summary",
-                "description": "Test",
-                "skill_md_path": f"{fake_skills_dir}/jellyfin/SKILL.md",
-                "skill_dir": f"{fake_skills_dir}/jellyfin",
-            },
-            "/sonarr-v3/v4-api": {
-                "name": "Sonarr v3/v4 API",
-                "description": "Test",
-                "skill_md_path": f"{fake_skills_dir}/sonarr/SKILL.md",
-                "skill_dir": f"{fake_skills_dir}/sonarr",
-            },
-        }
-        with (
-            patch("agent.skill_commands.get_skill_commands", return_value=fake_cmds),
-            patch("tools.skills_tool.SKILLS_DIR", tmp_path / "skills"),
-        ):
-            (tmp_path / "skills").mkdir(exist_ok=True)
-            menu, _ = telegram_menu_commands(max_commands=100)
-
-        # Every name must match Telegram's [a-z0-9_] requirement
-        tg_valid = re.compile(r"^[a-z0-9_]+$")
-        for name, _ in menu:
-            assert tg_valid.match(name), f"Invalid Telegram command name: {name!r}"
-
-    def test_empty_sanitized_names_excluded(self, tmp_path, monkeypatch):
-        """Skills whose names sanitize to empty string are silently dropped."""
+    def test_excludes_plugin_commands_from_telegram_menu(self):
+        from types import SimpleNamespace
         from unittest.mock import patch
 
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-
-        fake_skills_dir = str(tmp_path / "skills")
-        fake_cmds = {
-            "/+++": {
-                "name": "+++",
-                "description": "All special chars",
-                "skill_md_path": f"{fake_skills_dir}/bad/SKILL.md",
-                "skill_dir": f"{fake_skills_dir}/bad",
-            },
-            "/valid-skill": {
-                "name": "valid-skill",
-                "description": "Normal skill",
-                "skill_md_path": f"{fake_skills_dir}/valid/SKILL.md",
-                "skill_dir": f"{fake_skills_dir}/valid",
-            },
-        }
-        with (
-            patch("agent.skill_commands.get_skill_commands", return_value=fake_cmds),
-            patch("tools.skills_tool.SKILLS_DIR", tmp_path / "skills"),
-        ):
-            (tmp_path / "skills").mkdir(exist_ok=True)
-            menu, _ = telegram_menu_commands(max_commands=100)
+        plugin_manager = SimpleNamespace(
+            _plugin_commands={
+                "plugin-tool": {"description": "Plugin command"},
+            }
+        )
+        with patch("hermes_cli.plugins.get_plugin_manager", return_value=plugin_manager):
+            menu, hidden = telegram_menu_commands(max_commands=100, locale="zh")
 
         menu_names = {n for n, _ in menu}
-        # The valid skill should be present, the empty one should not
-        assert "valid_skill" in menu_names
-        # No empty string in menu names
-        assert "" not in menu_names
+        assert "plugin_tool" not in menu_names
+        assert hidden == 0
 
 
 # ---------------------------------------------------------------------------

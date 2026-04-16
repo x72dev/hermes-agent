@@ -4516,77 +4516,114 @@ class GatewayRunner:
 
     async def _handle_help_command(self, event: MessageEvent) -> str:
         """Handle /help command - list available commands."""
+        from gateway.config import Platform
         from hermes_cli.commands import gateway_help_lines
+
+        is_telegram = event.source.platform == Platform.TELEGRAM
+        locale = "zh" if is_telegram else "en"
         lines = [
-            "📖 **Hermes Commands**\n",
-            *gateway_help_lines(),
+            "📖 **Hermes 命令**\n" if is_telegram else "📖 **Hermes Commands**\n",
+            *gateway_help_lines(locale=locale),
         ]
         try:
             from agent.skill_commands import get_skill_commands
+
             skill_cmds = get_skill_commands()
             if skill_cmds:
-                lines.append(f"\n⚡ **Skill Commands** ({len(skill_cmds)} active):")
-                # Show first 10, then point to /commands for the rest
+                heading = (
+                    f"\n⚡ **技能命令**（已启用 {len(skill_cmds)} 个）："
+                    if is_telegram
+                    else f"\n⚡ **Skill Commands** ({len(skill_cmds)} active):"
+                )
+                lines.append(heading)
                 sorted_cmds = sorted(skill_cmds)
                 for cmd in sorted_cmds[:10]:
-                    lines.append(f"`{cmd}` — {skill_cmds[cmd]['description']}")
+                    desc = skill_cmds[cmd].get("description", "").strip() or (
+                        "技能命令" if is_telegram else "Skill command"
+                    )
+                    lines.append(f"`{cmd}` — {desc}")
                 if len(sorted_cmds) > 10:
-                    lines.append(f"\n... and {len(sorted_cmds) - 10} more. Use `/commands` for the full paginated list.")
+                    lines.append(
+                        (
+                            f"\n... 还有 {len(sorted_cmds) - 10} 个。使用 `/commands` 查看完整分页列表。"
+                            if is_telegram
+                            else f"\n... and {len(sorted_cmds) - 10} more. Use `/commands` for the full paginated list."
+                        )
+                    )
         except Exception:
             pass
         return "\n".join(lines)
 
     async def _handle_commands_command(self, event: MessageEvent) -> str:
         """Handle /commands [page] - paginated list of all commands and skills."""
+        from gateway.config import Platform
         from hermes_cli.commands import gateway_help_lines
+
+        is_telegram = event.source.platform == Platform.TELEGRAM
+        locale = "zh" if is_telegram else "en"
 
         raw_args = event.get_command_args().strip()
         if raw_args:
             try:
                 requested_page = int(raw_args)
             except ValueError:
-                return "Usage: `/commands [page]`"
+                return "用法：`/commands [页码]`" if is_telegram else "Usage: `/commands [page]`"
         else:
             requested_page = 1
 
-        # Build combined entry list: built-in commands + skill commands
-        entries = list(gateway_help_lines())
+        entries = list(gateway_help_lines(locale=locale))
         try:
             from agent.skill_commands import get_skill_commands
+
             skill_cmds = get_skill_commands()
             if skill_cmds:
                 entries.append("")
-                entries.append("⚡ **Skill Commands**:")
+                entries.append("⚡ **技能命令**:" if is_telegram else "⚡ **Skill Commands**:")
                 for cmd in sorted(skill_cmds):
-                    desc = skill_cmds[cmd].get("description", "").strip() or "Skill command"
+                    desc = skill_cmds[cmd].get("description", "").strip() or (
+                        "技能命令" if is_telegram else "Skill command"
+                    )
                     entries.append(f"`{cmd}` — {desc}")
         except Exception:
             pass
 
         if not entries:
-            return "No commands available."
+            return "当前没有可用命令。" if is_telegram else "No commands available."
 
-        from gateway.config import Platform
-        page_size = 15 if event.source.platform == Platform.TELEGRAM else 20
+        page_size = 15 if is_telegram else 20
         total_pages = max(1, (len(entries) + page_size - 1) // page_size)
         page = max(1, min(requested_page, total_pages))
         start = (page - 1) * page_size
         page_entries = entries[start:start + page_size]
 
         lines = [
-            f"📚 **Commands** ({len(entries)} total, page {page}/{total_pages})",
+            (
+                f"📚 **命令列表**（共 {len(entries)} 项，第 {page}/{total_pages} 页）"
+                if is_telegram
+                else f"📚 **Commands** ({len(entries)} total, page {page}/{total_pages})"
+            ),
             "",
             *page_entries,
         ]
         if total_pages > 1:
             nav_parts = []
             if page > 1:
-                nav_parts.append(f"`/commands {page - 1}` ← prev")
+                nav_parts.append(
+                    f"`/commands {page - 1}` ← 上一页" if is_telegram else f"`/commands {page - 1}` ← prev"
+                )
             if page < total_pages:
-                nav_parts.append(f"next → `/commands {page + 1}`")
+                nav_parts.append(
+                    f"下一页 → `/commands {page + 1}`" if is_telegram else f"next → `/commands {page + 1}`"
+                )
             lines.extend(["", " | ".join(nav_parts)])
         if page != requested_page:
-            lines.append(f"_(Requested page {requested_page} was out of range, showing page {page}.)_")
+            lines.append(
+                (
+                    f"_(请求的第 {requested_page} 页超出范围，当前显示第 {page} 页。)_"
+                    if is_telegram
+                    else f"_(Requested page {requested_page} was out of range, showing page {page}.)_"
+                )
+            )
         return "\n".join(lines)
     
     async def _handle_model_command(self, event: MessageEvent) -> Optional[str]:

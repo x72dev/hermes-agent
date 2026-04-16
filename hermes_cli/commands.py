@@ -200,6 +200,86 @@ def _build_description(cmd: CommandDef) -> str:
     return cmd.description
 
 
+_COMMAND_TRANSLATIONS: dict[str, dict[str, str]] = {
+    "zh": {
+        "new": "开始新会话（全新会话 ID 和历史）",
+        "clear": "清屏并开始新会话",
+        "history": "查看对话历史",
+        "save": "保存当前对话",
+        "retry": "重试上一条消息（重新发送给代理）",
+        "undo": "移除上一轮用户/助手对话",
+        "title": "设置当前会话标题",
+        "branch": "分叉当前会话（探索不同路径）",
+        "compress": "手动压缩对话上下文",
+        "rollback": "查看或恢复文件系统检查点",
+        "snapshot": "创建或恢复 Hermes 配置/状态快照",
+        "stop": "终止所有后台进程",
+        "approve": "批准待确认的危险命令",
+        "deny": "拒绝待确认的危险命令",
+        "background": "后台运行一个提示词",
+        "btw": "基于当前会话提一个临时问题（无工具、不持久化）",
+        "queue": "把提示词排到下一轮处理（不中断当前流程）",
+        "status": "查看会话信息",
+        "profile": "查看当前 profile 名称和主目录",
+        "sethome": "把当前聊天设为 Home 频道",
+        "resume": "恢复已命名的历史会话",
+        "config": "查看当前配置",
+        "model": "切换当前会话模型",
+        "provider": "查看可用 provider 和当前 provider",
+        "personality": "设置预设人格",
+        "statusbar": "切换上下文/模型状态栏",
+        "verbose": "切换工具进度显示：off → new → all → verbose",
+        "yolo": "切换 YOLO 模式（跳过危险命令审批）",
+        "reasoning": "管理推理强度和显示",
+        "fast": "切换快速模式",
+        "skin": "查看或切换显示皮肤/主题",
+        "voice": "切换语音模式",
+        "tools": "管理工具：/tools [list|disable|enable] [name...]",
+        "toolsets": "列出可用工具集",
+        "skills": "搜索、安装、查看或管理技能",
+        "cron": "管理定时任务",
+        "reload": "把 .env 变量重新加载到当前会话",
+        "reload-mcp": "从配置重新加载 MCP 服务",
+        "browser": "通过 CDP 把浏览器工具连接到你的 Chrome",
+        "plugins": "列出已安装插件及状态",
+        "commands": "浏览全部命令和技能（分页）",
+        "help": "显示可用命令",
+        "restart": "在清空活动任务后平滑重启 gateway",
+        "usage": "查看当前会话的 token 用量和速率限制",
+        "insights": "查看用量分析",
+        "platforms": "查看 gateway / 消息平台状态",
+        "paste": "检查剪贴板图片并附加",
+        "image": "附加本地图片到下一条提示",
+        "update": "将 Hermes Agent 更新到最新版本",
+        "debug": "上传调试报告（系统信息 + 日志）并获取分享链接",
+        "quit": "退出 CLI",
+    }
+}
+
+_LABEL_TRANSLATIONS: dict[str, dict[str, str]] = {
+    "zh": {
+        "alias": "别名",
+    }
+}
+
+
+def _normalize_locale(locale: str | None) -> str:
+    normalized = (locale or "en").strip().lower().replace("_", "-")
+    if normalized.startswith("zh"):
+        return "zh"
+    return "en"
+
+
+def _localized_command_description(cmd: CommandDef, locale: str = "en") -> str:
+    locale_key = _normalize_locale(locale)
+    return _COMMAND_TRANSLATIONS.get(locale_key, {}).get(cmd.name, cmd.description)
+
+
+def _localized_label(label: str, locale: str = "en") -> str:
+    locale_key = _normalize_locale(locale)
+    return _LABEL_TRANSLATIONS.get(locale_key, {}).get(label, label)
+
+
 # Backwards-compatible flat dict: "/command" -> description
 COMMANDS: dict[str, str] = {}
 for _cmd in COMMAND_REGISTRY:
@@ -298,9 +378,10 @@ def _is_gateway_available(cmd: CommandDef, config_overrides: set[str] | None = N
     return False
 
 
-def gateway_help_lines() -> list[str]:
+def gateway_help_lines(locale: str = "en") -> list[str]:
     """Generate gateway help text lines from the registry."""
     overrides = _resolve_config_gates()
+    locale_key = _normalize_locale(locale)
     lines: list[str] = []
     for cmd in COMMAND_REGISTRY:
         if not _is_gateway_available(cmd, overrides):
@@ -312,12 +393,12 @@ def gateway_help_lines() -> list[str]:
             if a.replace("-", "_") == cmd.name.replace("-", "_") and a != cmd.name:
                 continue
             alias_parts.append(f"`/{a}`")
-        alias_note = f" (alias: {', '.join(alias_parts)})" if alias_parts else ""
-        lines.append(f"`/{cmd.name}{args}` -- {cmd.description}{alias_note}")
+        alias_note = f" ({_localized_label('alias', locale_key)}: {', '.join(alias_parts)})" if alias_parts else ""
+        lines.append(f"`/{cmd.name}{args}` -- {_localized_command_description(cmd, locale_key)}{alias_note}")
     return lines
 
 
-def telegram_bot_commands() -> list[tuple[str, str]]:
+def telegram_bot_commands(locale: str = "en") -> list[tuple[str, str]]:
     """Return (command_name, description) pairs for Telegram setMyCommands.
 
     Telegram command names cannot contain hyphens, so they are replaced with
@@ -325,13 +406,14 @@ def telegram_bot_commands() -> list[tuple[str, str]]:
     canonical command.
     """
     overrides = _resolve_config_gates()
+    locale_key = _normalize_locale(locale)
     result: list[tuple[str, str]] = []
     for cmd in COMMAND_REGISTRY:
         if not _is_gateway_available(cmd, overrides):
             continue
         tg_name = _sanitize_telegram_name(cmd.name)
         if tg_name:
-            result.append((tg_name, cmd.description))
+            result.append((tg_name, _localized_command_description(cmd, locale_key)))
     return result
 
 
@@ -518,38 +600,18 @@ def _collect_gateway_skill_entries(
 # Platform-specific wrappers
 # ---------------------------------------------------------------------------
 
-def telegram_menu_commands(max_commands: int = 100) -> tuple[list[tuple[str, str]], int]:
+def telegram_menu_commands(max_commands: int = 100, locale: str = "en") -> tuple[list[tuple[str, str]], int]:
     """Return Telegram menu commands capped to the Bot API limit.
 
-    Priority order (higher priority = never bumped by overflow):
-      1. Core CommandDef commands (always included)
-      2. Plugin slash commands (take precedence over skills)
-      3. Built-in skill commands (fill remaining slots, alphabetical)
-
-    Skills are the only tier that gets trimmed when the cap is hit.
-    User-installed hub skills are excluded — accessible via /skills.
-    Skills disabled for the ``"telegram"`` platform (via ``hermes skills
-    config``) are excluded from the menu entirely.
+    Telegram BotCommand 菜单只保留内置命令。
+    技能和插件命令继续通过 /help 与 /commands 暴露。
 
     Returns:
         (menu_commands, hidden_count) where hidden_count is the number of
-        skill commands omitted due to the cap.
+        omitted commands. Telegram 菜单固定只含内置命令，因此始终为 0。
     """
-    core_commands = list(telegram_bot_commands())
-    reserved_names = {n for n, _ in core_commands}
-    all_commands = list(core_commands)
-
-    remaining_slots = max(0, max_commands - len(all_commands))
-    entries, hidden_count = _collect_gateway_skill_entries(
-        platform="telegram",
-        max_slots=remaining_slots,
-        reserved_names=reserved_names,
-        desc_limit=40,
-        sanitize_name=_sanitize_telegram_name,
-    )
-    # Drop the cmd_key — Telegram only needs (name, desc) pairs.
-    all_commands.extend((n, d) for n, d, _k in entries)
-    return all_commands[:max_commands], hidden_count
+    core_commands = list(telegram_bot_commands(locale=locale))
+    return core_commands[:max_commands], 0
 
 
 def discord_skill_commands(
